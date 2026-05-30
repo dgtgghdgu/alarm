@@ -18,37 +18,35 @@
         }
         .bg-pulse {
             position: fixed; inset: 0; z-index: 0;
-            animation: bgFlash 1.2s ease-in-out infinite;
+            animation: bgFlash 0.8s ease-in-out infinite;
         }
         @keyframes bgFlash {
             0%, 100% { background-color: rgba(220, 38, 38, 0); }
-            50% { background-color: rgba(220, 38, 38, 0.18); }
+            50% { background-color: rgba(220, 38, 38, 0.25); }
         }
         .container { position: relative; z-index: 1; text-align: center; }
         .icon {
             font-size: 64px;
-            animation: iconPulse 1.2s ease-in-out infinite;
+            animation: iconPulse 0.8s ease-in-out infinite;
         }
         @keyframes iconPulse {
             0%, 100% { transform: scale(1); opacity: 0.8; }
-            50% { transform: scale(1.15); opacity: 1; }
+            50% { transform: scale(1.2); opacity: 1; }
         }
         .title {
             color: #f87171; font-size: 28px; font-weight: 700;
             margin-top: 16px; letter-spacing: 6px;
-            animation: textBlink 1s step-end infinite;
+            animation: textBlink 0.8s step-end infinite;
         }
         @keyframes textBlink {
-            0%, 100% { opacity: 1; } 50% { opacity: 0.4; }
+            0%, 100% { opacity: 1; } 50% { opacity: 0.3; }
         }
         .status {
             color: #64748b; font-size: 13px; margin-top: 16px;
-            transition: color 0.3s;
         }
         .status.ok { color: #22c55e; }
         .status.blocked { color: #fbbf24; }
 
-        /* 全屏可点击覆盖层 —— 浏览器拦截时显示 */
         .unlock-overlay {
             display: none;
             position: fixed; inset: 0; z-index: 100;
@@ -65,26 +63,21 @@
             color: #fca5a5; font-size: 20px; font-weight: 700;
             cursor: pointer; letter-spacing: 2px;
             box-shadow: 0 0 50px rgba(220,38,38,0.4);
-            animation: btnGlow 2s ease-in-out infinite;
+            animation: btnGlow 1.5s ease-in-out infinite;
         }
         @keyframes btnGlow {
             0%, 100% { box-shadow: 0 0 40px rgba(220,38,38,0.3); }
             50% { box-shadow: 0 0 80px rgba(220,38,38,0.6); }
         }
-        .unlock-overlay .hint {
-            color: #94a3b8; font-size: 14px;
-        }
+        .unlock-overlay .hint { color: #94a3b8; font-size: 14px; }
     </style>
 </head>
 <body>
     <div class="bg-pulse"></div>
-
-    <!-- 拦截时显示的全屏点击层 -->
     <div class="unlock-overlay" id="unlockOverlay" onclick="unlockAndPlay()">
         <button class="big-btn" onclick="unlockAndPlay()">点击启动<br>警报声</button>
         <div class="hint">浏览器要求点击一次才能播放声音</div>
     </div>
-
     <div class="container">
         <div class="icon">🚨</div>
         <div class="title">警 报</div>
@@ -92,50 +85,88 @@
     </div>
 
     <script>
-        let audioCtx = null;
-        let alarmTimer = null;
-        let playing = false;
+        var audioCtx = null;
+        var playing = false;
+        var sirenNode = null;
+        var sirenGain = null;
 
-        function makeBeep() {
+        // ====== 工业声光报警器：持续扫频尖叫 ======
+        function createSiren() {
             if (!audioCtx || audioCtx.state !== 'running') return;
-            const t = audioCtx.currentTime;
 
-            // 高音
-            const o1 = audioCtx.createOscillator();
-            const g1 = audioCtx.createGain();
-            o1.type = 'square';
-            o1.frequency.setValueAtTime(880, t);
-            o1.frequency.setValueAtTime(1, t + 0.45);
-            o1.frequency.setValueAtTime(1100, t + 0.6);
-            o1.frequency.setValueAtTime(1, t + 1.05);
-            g1.gain.setValueAtTime(0.18, t);
-            g1.gain.linearRampToValueAtTime(0, t + 0.45);
-            g1.gain.setValueAtTime(0.18, t + 0.6);
-            g1.gain.linearRampToValueAtTime(0, t + 1.05);
-            o1.connect(g1); g1.connect(audioCtx.destination);
-            o1.start(t); o1.stop(t + 1.2);
+            // --- 主音：高频扫频锯齿波（尖锐刺耳） ---
+            var osc1 = audioCtx.createOscillator();
+            osc1.type = 'sawtooth';
+            // 不设固定频率，由 LFO 来调制
 
-            // 低音
-            const o2 = audioCtx.createOscillator();
-            const g2 = audioCtx.createGain();
-            o2.type = 'sawtooth';
-            o2.frequency.setValueAtTime(220, t);
-            o2.frequency.setValueAtTime(1, t + 0.45);
-            o2.frequency.setValueAtTime(280, t + 0.6);
-            o2.frequency.setValueAtTime(1, t + 1.05);
-            g2.gain.setValueAtTime(0.07, t);
-            g2.gain.linearRampToValueAtTime(0, t + 0.45);
-            g2.gain.setValueAtTime(0.07, t + 0.6);
-            g2.gain.linearRampToValueAtTime(0, t + 1.05);
-            o2.connect(g2); g2.connect(audioCtx.destination);
-            o2.start(t); o2.stop(t + 1.2);
+            // LFO 控制主音频率做上下扫频（模拟警笛）
+            var lfo = audioCtx.createOscillator();
+            var lfoGain = audioCtx.createGain();
+            lfo.type = 'triangle';
+            lfo.frequency.value = 2.5;        // 每秒扫2.5个来回，急促
+            lfoGain.gain.value = 800;         // 扫频范围 ±800Hz
+            lfo.connect(lfoGain);
+            lfoGain.connect(osc1.frequency);
+            osc1.frequency.value = 1800;      // 中心频率1800Hz
+
+            // --- 第二层：更高频的方波叠加，增加刺耳感 ---
+            var osc2 = audioCtx.createOscillator();
+            osc2.type = 'square';
+            var lfo2Gain = audioCtx.createGain();
+            lfo2Gain.gain.value = 500;
+            lfo.connect(lfo2Gain);
+            lfo2Gain.connect(osc2.frequency);
+            osc2.frequency.value = 2400;      // 更高的中心频率
+
+            // --- 第三层：脉冲调制，模拟"嘀嘀嘀"断续感 ---
+            var pulseOsc = audioCtx.createOscillator();
+            pulseOsc.type = 'square';
+            pulseOsc.frequency.value = 6;     // 每秒6次脉冲断续
+            var pulseGain = audioCtx.createGain();
+            pulseGain.gain.value = 0.5;
+            var pulseOffset = audioCtx.createConstantSource();
+            pulseOffset.offset.value = 0.5;
+
+            // 混合增益
+            var masterGain = audioCtx.createGain();
+            masterGain.gain.value = 0.25;     // 总音量
+
+            var gain1 = audioCtx.createGain();
+            gain1.gain.value = 0.7;           // 主音占比
+            var gain2 = audioCtx.createGain();
+            gain2.gain.value = 0.3;           // 高频叠加占比
+
+            // 脉冲调幅节点
+            var ampMod = audioCtx.createGain();
+            ampMod.gain.value = 0;
+            pulseOsc.connect(pulseGain);
+            pulseGain.connect(ampMod.gain);
+            pulseOffset.connect(ampMod.gain);
+
+            // 连接音频图
+            osc1.connect(gain1);
+            osc2.connect(gain2);
+            gain1.connect(ampMod);
+            gain2.connect(ampMod);
+            ampMod.connect(masterGain);
+            masterGain.connect(audioCtx.destination);
+
+            // 启动所有节点
+            lfo.start();
+            osc1.start();
+            osc2.start();
+            pulseOsc.start();
+            pulseOffset.start();
+
+            // 保存引用以便停止
+            sirenGain = masterGain;
+            sirenNode = { osc1: osc1, osc2: osc2, lfo: lfo, pulseOsc: pulseOsc, pulseOffset: pulseOffset };
         }
 
         function startLoop() {
             if (playing) return;
             playing = true;
-            makeBeep();
-            alarmTimer = setInterval(makeBeep, 1200);
+            createSiren();
             document.getElementById('status').textContent = '🔊 警报播放中';
             document.getElementById('status').className = 'status ok';
             document.getElementById('unlockOverlay').classList.remove('visible');
@@ -156,12 +187,10 @@
             });
         }
 
-        // ===== 页面加载后立刻尝试 =====
         window.addEventListener('load', function() {
             try {
                 audioCtx = new (window.AudioContext || window.webkitAudioContext)();
                 audioCtx.resume().then(function() {
-                    // 给浏览器 200ms 反应时间再检查真实状态
                     setTimeout(function() {
                         if (audioCtx.state === 'running') {
                             startLoop();
@@ -172,11 +201,9 @@
                 }).catch(function() {
                     showBlocked();
                 });
-
-                // 双保险：500ms 后再检查一次
                 setTimeout(function() {
                     if (!playing) {
-                        if (audioCtx.state === 'running') {
+                        if (audioCtx && audioCtx.state === 'running') {
                             startLoop();
                         } else {
                             showBlocked();
@@ -187,7 +214,6 @@
                 showBlocked();
             }
 
-            // 任何交互都尝试解锁
             ['click','touchstart','mousedown','keydown'].forEach(function(evt) {
                 document.addEventListener(evt, unlockAndPlay, { once: true });
             });
