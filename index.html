@@ -14,7 +14,6 @@
             font-family: 'Microsoft YaHei', sans-serif;
             background: #0a0a0a;
             overflow: hidden;
-            cursor: default;
         }
         .bg-pulse {
             position: fixed; inset: 0; z-index: 0;
@@ -25,10 +24,7 @@
             50% { background-color: rgba(220, 38, 38, 0.25); }
         }
         .container { position: relative; z-index: 1; text-align: center; }
-        .icon {
-            font-size: 64px;
-            animation: iconPulse 0.8s ease-in-out infinite;
-        }
+        .icon { font-size: 64px; animation: iconPulse 0.8s ease-in-out infinite; }
         @keyframes iconPulse {
             0%, 100% { transform: scale(1); opacity: 0.8; }
             50% { transform: scale(1.2); opacity: 1; }
@@ -38,22 +34,15 @@
             margin-top: 16px; letter-spacing: 6px;
             animation: textBlink 0.8s step-end infinite;
         }
-        @keyframes textBlink {
-            0%, 100% { opacity: 1; } 50% { opacity: 0.3; }
-        }
-        .status {
-            color: #64748b; font-size: 13px; margin-top: 16px;
-        }
+        @keyframes textBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        .status { color: #64748b; font-size: 13px; margin-top: 16px; }
         .status.ok { color: #22c55e; }
-        .status.blocked { color: #fbbf24; }
 
         .unlock-overlay {
-            display: none;
-            position: fixed; inset: 0; z-index: 100;
+            display: none; position: fixed; inset: 0; z-index: 100;
             background: rgba(0,0,0,0.85);
             align-items: center; justify-content: center;
-            flex-direction: column; gap: 20px;
-            cursor: pointer;
+            flex-direction: column; gap: 20px; cursor: pointer;
         }
         .unlock-overlay.visible { display: flex; }
         .unlock-overlay .big-btn {
@@ -62,7 +51,6 @@
             background: radial-gradient(circle at 40% 35%, #991b1b, #450a0a);
             color: #fca5a5; font-size: 20px; font-weight: 700;
             cursor: pointer; letter-spacing: 2px;
-            box-shadow: 0 0 50px rgba(220,38,38,0.4);
             animation: btnGlow 1.5s ease-in-out infinite;
         }
         @keyframes btnGlow {
@@ -74,8 +62,8 @@
 </head>
 <body>
     <div class="bg-pulse"></div>
-    <div class="unlock-overlay" id="unlockOverlay" onclick="unlockAndPlay()">
-        <button class="big-btn" onclick="unlockAndPlay()">点击启动<br>警报声</button>
+    <div class="unlock-overlay" id="unlockOverlay" onclick="manualPlay()">
+        <button class="big-btn" onclick="manualPlay()">点击启动<br>警报声</button>
         <div class="hint">浏览器要求点击一次才能播放声音</div>
     </div>
     <div class="container">
@@ -85,137 +73,150 @@
     </div>
 
     <script>
-        var audioCtx = null;
-        var playing = false;
-        var sirenNode = null;
-        var sirenGain = null;
+        // ====== 生成工业报警器 WAV 音频数据 ======
+        function generateSirenWAV() {
+            var sampleRate = 44100;
+            var duration = 3;  // 3秒一段，loop播放
+            var numSamples = sampleRate * duration;
+            var buffer = new Float32Array(numSamples);
 
-        // ====== 工业声光报警器：持续扫频尖叫 ======
-        function createSiren() {
-            if (!audioCtx || audioCtx.state !== 'running') return;
+            for (var i = 0; i < numSamples; i++) {
+                var t = i / sampleRate;
 
-            // --- 主音：高频扫频锯齿波（尖锐刺耳） ---
-            var osc1 = audioCtx.createOscillator();
-            osc1.type = 'sawtooth';
-            // 不设固定频率，由 LFO 来调制
+                // 扫频：在 1000Hz ~ 2600Hz 之间来回扫，每秒2.5个来回
+                var sweep = Math.sin(2 * Math.PI * 2.5 * t);
+                var freq = 1800 + sweep * 800;
 
-            // LFO 控制主音频率做上下扫频（模拟警笛）
-            var lfo = audioCtx.createOscillator();
-            var lfoGain = audioCtx.createGain();
-            lfo.type = 'triangle';
-            lfo.frequency.value = 2.5;        // 每秒扫2.5个来回，急促
-            lfoGain.gain.value = 800;         // 扫频范围 ±800Hz
-            lfo.connect(lfoGain);
-            lfoGain.connect(osc1.frequency);
-            osc1.frequency.value = 1800;      // 中心频率1800Hz
+                // 主音：锯齿波
+                var phase1 = (freq * t) % 1;
+                var saw = 2 * phase1 - 1;
 
-            // --- 第二层：更高频的方波叠加，增加刺耳感 ---
-            var osc2 = audioCtx.createOscillator();
-            osc2.type = 'square';
-            var lfo2Gain = audioCtx.createGain();
-            lfo2Gain.gain.value = 500;
-            lfo.connect(lfo2Gain);
-            lfo2Gain.connect(osc2.frequency);
-            osc2.frequency.value = 2400;      // 更高的中心频率
+                // 高频叠加：方波 2400Hz 基础 + 扫频偏移
+                var freq2 = 2400 + sweep * 500;
+                var phase2 = (freq2 * t) % 1;
+                var square = phase2 < 0.5 ? 1 : -1;
 
-            // --- 第三层：脉冲调制，模拟"嘀嘀嘀"断续感 ---
-            var pulseOsc = audioCtx.createOscillator();
-            pulseOsc.type = 'square';
-            pulseOsc.frequency.value = 6;     // 每秒6次脉冲断续
-            var pulseGain = audioCtx.createGain();
-            pulseGain.gain.value = 0.5;
-            var pulseOffset = audioCtx.createConstantSource();
-            pulseOffset.offset.value = 0.5;
+                // 混合
+                var mixed = saw * 0.65 + square * 0.35;
 
-            // 混合增益
-            var masterGain = audioCtx.createGain();
-            masterGain.gain.value = 0.25;     // 总音量
+                // 脉冲调制：每秒6次断续
+                var pulse = Math.sin(2 * Math.PI * 6 * t) > 0 ? 1.0 : 0.15;
 
-            var gain1 = audioCtx.createGain();
-            gain1.gain.value = 0.7;           // 主音占比
-            var gain2 = audioCtx.createGain();
-            gain2.gain.value = 0.3;           // 高频叠加占比
+                buffer[i] = mixed * pulse * 0.45;  // 总音量
+            }
 
-            // 脉冲调幅节点
-            var ampMod = audioCtx.createGain();
-            ampMod.gain.value = 0;
-            pulseOsc.connect(pulseGain);
-            pulseGain.connect(ampMod.gain);
-            pulseOffset.connect(ampMod.gain);
+            // 编码为 16-bit PCM WAV
+            var numChannels = 1;
+            var bitsPerSample = 16;
+            var byteRate = sampleRate * numChannels * bitsPerSample / 8;
+            var blockAlign = numChannels * bitsPerSample / 8;
+            var dataSize = numSamples * blockAlign;
+            var headerSize = 44;
+            var wav = new ArrayBuffer(headerSize + dataSize);
+            var view = new DataView(wav);
 
-            // 连接音频图
-            osc1.connect(gain1);
-            osc2.connect(gain2);
-            gain1.connect(ampMod);
-            gain2.connect(ampMod);
-            ampMod.connect(masterGain);
-            masterGain.connect(audioCtx.destination);
+            function writeString(offset, str) {
+                for (var j = 0; j < str.length; j++) {
+                    view.setUint8(offset + j, str.charCodeAt(j));
+                }
+            }
 
-            // 启动所有节点
-            lfo.start();
-            osc1.start();
-            osc2.start();
-            pulseOsc.start();
-            pulseOffset.start();
+            writeString(0, 'RIFF');
+            view.setUint32(4, 36 + dataSize, true);
+            writeString(8, 'WAVE');
+            writeString(12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true);          // PCM
+            view.setUint16(22, numChannels, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, byteRate, true);
+            view.setUint16(32, blockAlign, true);
+            view.setUint16(34, bitsPerSample, true);
+            writeString(36, 'data');
+            view.setUint32(40, dataSize, true);
 
-            // 保存引用以便停止
-            sirenGain = masterGain;
-            sirenNode = { osc1: osc1, osc2: osc2, lfo: lfo, pulseOsc: pulseOsc, pulseOffset: pulseOffset };
+            // 写入采样数据
+            var offset = 44;
+            for (var k = 0; k < numSamples; k++) {
+                var sample = Math.max(-1, Math.min(1, buffer[k]));
+                var intSample = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+                view.setInt16(offset, intSample, true);
+                offset += 2;
+            }
+
+            return new Blob([wav], { type: 'audio/wav' });
         }
 
-        function startLoop() {
-            if (playing) return;
+        // ====== 播放逻辑 ======
+        var audioEl = null;
+        var playing = false;
+
+        function createAudio() {
+            var blob = generateSirenWAV();
+            var url = URL.createObjectURL(blob);
+            audioEl = document.createElement('audio');
+            audioEl.src = url;
+            audioEl.loop = true;
+            audioEl.autoplay = true;
+            audioEl.setAttribute('playsinline', '');
+            audioEl.volume = 1.0;
+            document.body.appendChild(audioEl);
+            return audioEl;
+        }
+
+        function markPlaying() {
             playing = true;
-            createSiren();
             document.getElementById('status').textContent = '🔊 警报播放中';
             document.getElementById('status').className = 'status ok';
             document.getElementById('unlockOverlay').classList.remove('visible');
         }
 
         function showBlocked() {
-            document.getElementById('status').textContent = '⚠ 等待点击启动声音';
-            document.getElementById('status').className = 'status blocked';
+            document.getElementById('status').textContent = '⚠ 等待点击启动';
+            document.getElementById('status').className = 'status';
             document.getElementById('unlockOverlay').classList.add('visible');
         }
 
-        function unlockAndPlay() {
-            if (!audioCtx) {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function manualPlay() {
+            if (playing) return;
+            if (!audioEl) createAudio();
+            var p = audioEl.play();
+            if (p && p.then) {
+                p.then(markPlaying).catch(function() {});
             }
-            audioCtx.resume().then(function() {
-                startLoop();
-            });
         }
 
+        // ====== 启动 ======
         window.addEventListener('load', function() {
-            try {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                audioCtx.resume().then(function() {
-                    setTimeout(function() {
-                        if (audioCtx.state === 'running') {
-                            startLoop();
-                        } else {
-                            showBlocked();
-                        }
-                    }, 200);
+            createAudio();
+
+            // 尝试播放
+            var playPromise = audioEl.play();
+            if (playPromise && playPromise.then) {
+                playPromise.then(function() {
+                    markPlaying();
                 }).catch(function() {
                     showBlocked();
                 });
-                setTimeout(function() {
-                    if (!playing) {
-                        if (audioCtx && audioCtx.state === 'running') {
-                            startLoop();
-                        } else {
-                            showBlocked();
-                        }
-                    }
-                }, 500);
-            } catch(e) {
-                showBlocked();
             }
 
-            ['click','touchstart','mousedown','keydown'].forEach(function(evt) {
-                document.addEventListener(evt, unlockAndPlay, { once: true });
+            // 双保险：500ms后检查
+            setTimeout(function() {
+                if (!playing) {
+                    if (!audioEl.paused) {
+                        markPlaying();
+                    } else {
+                        showBlocked();
+                    }
+                }
+            }, 600);
+
+            // 任何交互自动触发
+            ['click','touchstart','mousedown','keydown','mousemove'].forEach(function(evt) {
+                document.addEventListener(evt, function handler() {
+                    if (!playing) manualPlay();
+                    document.removeEventListener(evt, handler);
+                });
             });
         });
     </script>
