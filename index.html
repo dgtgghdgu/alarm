@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>⚠️ 警报</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Microsoft YaHei', sans-serif;
+            background: #0a0a0a;
+            overflow: hidden;
+            cursor: default;
+        }
+        .bg-pulse {
+            position: fixed;
+            inset: 0;
+            z-index: 0;
+            animation: bgFlash 1.2s ease-in-out infinite;
+        }
+        @keyframes bgFlash {
+            0%, 100% { background-color: rgba(220, 38, 38, 0); }
+            50% { background-color: rgba(220, 38, 38, 0.18); }
+        }
+        .container {
+            position: relative;
+            z-index: 1;
+            text-align: center;
+        }
+        .icon {
+            font-size: 64px;
+            animation: iconPulse 1.2s ease-in-out infinite;
+        }
+        @keyframes iconPulse {
+            0%, 100% { transform: scale(1); opacity: 0.8; }
+            50% { transform: scale(1.15); opacity: 1; }
+        }
+        .title {
+            color: #f87171;
+            font-size: 28px;
+            font-weight: 700;
+            margin-top: 16px;
+            letter-spacing: 6px;
+            animation: textBlink 1s step-end infinite;
+        }
+        @keyframes textBlink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        .status {
+            color: #64748b;
+            font-size: 12px;
+            margin-top: 16px;
+        }
+        .status.ok { color: #22c55e; }
+        .status.blocked { color: #f59e0b; }
+
+        /* 如果音频被浏览器拦截，显示提示 */
+        .unlock-hint {
+            display: none;
+            color: #fbbf24;
+            font-size: 14px;
+            margin-top: 20px;
+            padding: 12px 24px;
+            border: 1px dashed #fbbf24;
+            border-radius: 8px;
+            cursor: pointer;
+            animation: hintPulse 2s ease-in-out infinite;
+        }
+        .unlock-hint.visible { display: inline-block; }
+        @keyframes hintPulse {
+            0%, 100% { opacity: 0.6; }
+            50% { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-pulse"></div>
+    <div class="container">
+        <div class="icon">🚨</div>
+        <div class="title">警 报</div>
+        <div class="status" id="status">正在启动...</div>
+        <div class="unlock-hint" id="unlockHint" onclick="unlockAudio()">
+            ⚠ 浏览器拦截了自动播放，点击此处或移入鼠标启动声音
+        </div>
+    </div>
+
+    <script>
+        let audioCtx = null;
+        let alarmInterval = null;
+        let isPlaying = false;
+
+        function playAlarmCycle() {
+            if (!audioCtx || audioCtx.state !== 'running') return;
+            const now = audioCtx.currentTime;
+
+            // 高音警报
+            const osc1 = audioCtx.createOscillator();
+            const gain1 = audioCtx.createGain();
+            osc1.type = 'square';
+            osc1.frequency.setValueAtTime(880, now);
+            osc1.frequency.setValueAtTime(0, now + 0.5);
+            osc1.frequency.setValueAtTime(1100, now + 0.6);
+            osc1.frequency.setValueAtTime(0, now + 1.1);
+            gain1.gain.setValueAtTime(0.15, now);
+            gain1.gain.setValueAtTime(0, now + 0.45);
+            gain1.gain.setValueAtTime(0.15, now + 0.6);
+            gain1.gain.setValueAtTime(0, now + 1.05);
+            osc1.connect(gain1);
+            gain1.connect(audioCtx.destination);
+            osc1.start(now);
+            osc1.stop(now + 1.2);
+
+            // 低频底音
+            const osc2 = audioCtx.createOscillator();
+            const gain2 = audioCtx.createGain();
+            osc2.type = 'sawtooth';
+            osc2.frequency.setValueAtTime(220, now);
+            osc2.frequency.setValueAtTime(0, now + 0.5);
+            osc2.frequency.setValueAtTime(280, now + 0.6);
+            osc2.frequency.setValueAtTime(0, now + 1.1);
+            gain2.gain.setValueAtTime(0.06, now);
+            gain2.gain.setValueAtTime(0, now + 0.45);
+            gain2.gain.setValueAtTime(0.06, now + 0.6);
+            gain2.gain.setValueAtTime(0, now + 1.05);
+            osc2.connect(gain2);
+            gain2.connect(audioCtx.destination);
+            osc2.start(now);
+            osc2.stop(now + 1.2);
+        }
+
+        function startAlarm() {
+            if (isPlaying) return;
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+            // 尝试解除浏览器挂起状态
+            audioCtx.resume().then(() => {
+                if (audioCtx.state === 'running') {
+                    isPlaying = true;
+                    playAlarmCycle();
+                    alarmInterval = setInterval(playAlarmCycle, 1200);
+                    document.getElementById('status').textContent = '🔊 警报播放中';
+                    document.getElementById('status').className = 'status ok';
+                    document.getElementById('unlockHint').classList.remove('visible');
+                    // 移除所有解锁监听器
+                    removeUnlockListeners();
+                } else {
+                    showBlocked();
+                }
+            }).catch(() => {
+                showBlocked();
+            });
+        }
+
+        function showBlocked() {
+            document.getElementById('status').textContent = '⚠ 等待用户交互以启动声音';
+            document.getElementById('status').className = 'status blocked';
+            document.getElementById('unlockHint').classList.add('visible');
+            addUnlockListeners();
+        }
+
+        function unlockAudio() {
+            if (audioCtx) {
+                audioCtx.resume().then(() => {
+                    if (!isPlaying && audioCtx.state === 'running') {
+                        isPlaying = true;
+                        playAlarmCycle();
+                        alarmInterval = setInterval(playAlarmCycle, 1200);
+                        document.getElementById('status').textContent = '🔊 警报播放中';
+                        document.getElementById('status').className = 'status ok';
+                        document.getElementById('unlockHint').classList.remove('visible');
+                        removeUnlockListeners();
+                    }
+                });
+            } else {
+                startAlarm();
+            }
+        }
+
+        // 任何用户交互都会触发解锁
+        function addUnlockListeners() {
+            document.addEventListener('mousemove', unlockAudio, { once: true });
+            document.addEventListener('mouseenter', unlockAudio, { once: true });
+            document.addEventListener('click', unlockAudio, { once: true });
+            document.addEventListener('touchstart', unlockAudio, { once: true });
+            document.addEventListener('keydown', unlockAudio, { once: true });
+            document.addEventListener('scroll', unlockAudio, { once: true });
+        }
+
+        function removeUnlockListeners() {
+            document.removeEventListener('mousemove', unlockAudio);
+            document.removeEventListener('mouseenter', unlockAudio);
+            document.removeEventListener('click', unlockAudio);
+            document.removeEventListener('touchstart', unlockAudio);
+            document.removeEventListener('keydown', unlockAudio);
+            document.removeEventListener('scroll', unlockAudio);
+        }
+
+        // 页面加载后立刻尝试播放
+        window.addEventListener('load', () => {
+            startAlarm();
+        });
+    </script>
+</body>
+</html>
